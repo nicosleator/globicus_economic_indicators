@@ -9,14 +9,14 @@ library(RMariaDB)
 library(fredr)
 source("econ_data_functions.R")
 
-fredr_set_key("_____")
+fredr_set_key("your_fred_api_key")
 
-#connect to mariaDB
+#connect to MariaDB
 con <- dbConnect(MariaDB(),
-                 user = '_____',        #computer username
-                 password = '_____',    #computer password
-                 dbname = 'fred',       #fred database
-                 host = '_____')        #IP address
+                 user = 'your_username',
+                 password = 'your_password',
+                 dbname = 'fred',
+                 host = '127.0.0.1')
 
 #read and format files from fred
 GDPC1 <- read_fred_from_maria(series_id = "GDPC1", value_name = "GDPC1") #same as excel
