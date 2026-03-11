@@ -1,4 +1,36 @@
 # globicus-data-management
-Here, we pull data from the Federal Reserve Bank of St Louis (FRED), and apply transformations to create custom economic indicators.
 
-In order to pull series from fred, you will need an account on FRED's website https://fred.stlouisfed.org/ and requrest an API key.
+Pull data from the [Federal Reserve Bank of St. Louis (FRED)](https://fred.stlouisfed.org/) and apply 
+transformations to create custom economic indicators.
+
+## Prerequisites
+
+- R
+- A FRED account and API key — register at https://fred.stlouisfed.org/ and request a key under 
+  *My Account > API Keys*
+- MariaDB installed with access to the 'fred' database
+
+## Configuration
+
+Before running, replace the hardcoded credentials in each script with your own:
+
+**FRED API key** (in `usco` and `usld`):
+```r
+fredr_set_key("your_fred_api_key")
+```
+
+**MariaDB connection** (in `usco` and `usld`):
+```r
+con <- dbConnect(MariaDB(),
+                 user = 'your_username',
+                 password = 'your_password',
+                 dbname = 'fred',
+                 host = '127.0.0.1')
+```
+
+
+## Project Structure
+
+`econ_data_functions` - Core functions for transforming raw FRED data into economic indicators
+`usld` - Pulls and transforms leading variables (e.g. S&P 500) to produce leading indexes
+`usco` - Pulls and transforms lagging variables (e.g. GDP) to produce lagging indexes
