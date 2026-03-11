@@ -1,4 +1,4 @@
-# globicus_economic_indexes 
+# globicus_economic_indicators
 
 Pull data from the [Federal Reserve Bank of St. Louis (FRED)](https://fred.stlouisfed.org/) and apply 
 transformations to create custom economic indicators.
