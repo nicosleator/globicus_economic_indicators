@@ -1,0 +1,241 @@
+#download libraries
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(readxl)
+library(purrr)
+
+#read and format fred files using MariaDB
+read_fred_from_maria <- function(series_id, observation_start = as.Date("1948-01-01"), 
+                              frequency = "", units = "", value_name = "value") {
+  df <- fredr_series_observations(
+    series_id = series_id,
+    observation_start = observation_start,
+    frequency = frequency,
+    units = units
+  )
+  new_df <- df %>%
+    select(-realtime_start, -realtime_end, -series_id) %>%
+    rename(!!value_name := value)
+  
+  return(new_df)
+}
+
+#read files directly from MariaDB
+read_from_maria <- function(series_id, value_name) {
+  df <- dbReadTable(con, series_id) %>% rename(!!value_name := value)
+  return(df)
+}
+
+#read and formats an excel sheet into a df
+format_from_excel <- function(excel, df, skip, range = cell_cols("A:B")) {
+  new_df <- read_excel(excel, sheet = df, skip = skip ,range = range, col_names = TRUE)
+  date_col <- names(new_df)[tolower(names(new_df)) == "date"]
+  new_df <- new_df %>% 
+    rename(date = all_of(date_col)) %>%
+    mutate(date = as.Date(date))
+  return(new_df)
+}
+
+#create a function for symmetric percent change
+symmetric_pct_change <- function(old, new) {
+  200 * (new - old) / (new + old)
+}
+
+#create a function for average deviation
+ave_dev <- function(x) {
+  mean(abs(x - mean(x, na.rm = TRUE)), na.rm = TRUE)
+}
+
+#returns a set of monthly dates based on a df with quarterly dates
+monthly_from_quartely_dates <- function(df) {
+  monthly_dates <- seq.Date(
+    from = floor_date(min(df$date, na.rm = TRUE), "month"),
+    to   = floor_date(max(df$date, na.rm = TRUE), "month"),
+    by   = "month"
+  )
+  return(monthly_dates)
+}
+
+
+#transforms quartely data into monthly data by dividing the values into 3
+q_to_m <- function(monthly_dates, df, df_variable, new_df_variable) {
+  df_variable <- enquo(df_variable)
+  new_df_variable <- enquo(new_df_variable)
+  new_df <- data.frame(date = monthly_dates) %>%
+    left_join(df %>% select(date, !!df_variable), by = "date") %>%
+    mutate(
+      !!new_df_variable := case_when(
+        is.na(!!df_variable) & !is.na(lag(!!df_variable)) ~ lag(!!df_variable) / 3,
+        is.na(!!df_variable) & !is.na(lag(!!df_variable, n = 2)) ~ lag(!!df_variable, n = 2) / 3,
+        !is.na(!!df_variable) ~ !!df_variable / 3,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    select(-!!df_variable)
+  return(new_df)
+}
+#create a function for smoothed growth rate where we divide the n by n-12
+smgr_div <- function(df, column, new_column = "smgr") {
+  df <- df %>%
+    mutate(!!new_column := (.data[[column]] / lag(.data[[column]], n = 12) - 1) * 100)
+  return(df)
+}
+
+#create a function for smoothed rate that calculates the average of the past 12 values
+smgr_ave <- function(df, column, new_column = "smgr") {
+  x <- df[[column]]  # extract the column as a vector
+  df <- df %>%
+    mutate(!!new_column := map_dbl(row_number(), function(i) {
+      if (i > 12) {
+        x[i] - mean(x[(i - 12):(i - 1)], na.rm = TRUE)
+      } else {
+        NA_real_
+      }
+    }))
+  return(df)
+}
+
+#create a function for annualized growth rate
+ann_ave <- function(df, column, newcolumn) {
+  x <- df[[column]]
+  df[[newcolumn]] <- NA_real_  # initialize the new column with NAs
+  for (i in 12:length(x)) {
+    if (!any(is.na(x[(i - 12):(i - 1)]))) {
+      df[[newcolumn]][i] <- 100 * ((x[i] / mean(x[(i - 12):(i - 1)]))^(12 / 6.5) - 1)
+    }
+  }
+  return(df)
+}
+
+#create a function for annualized growth rate, not including ^(12 / 6.5)
+ann_ave_alt <- function(df, column, newcolumn) {
+  x <- df[[column]]
+  df[[newcolumn]] <- NA_real_  # initialize the new column with NAs
+  for (i in 13:length(x)) {
+    if (!any(is.na(x[(i - 13):(i - 1)]))) {
+      df[[newcolumn]][i] <- 100 * ((x[i] / mean(x[(i - 12):(i - 1)])) - 1)
+    }
+  }
+  return(df)
+}
+
+#function for dividing one row by another
+div <- function(df, column_1, column_2, new_column = "div", multiplier = 1) {
+  x <- df[[column_1]]  # extract the vector
+  y <- df[[column_2]]  # extract the vector
+  df <- df %>%
+    mutate(!!new_column := multiplier * (x/y))
+  return(df)
+}
+
+#subtract two columns
+subtract <- function(df, column_1, column_2, new_column = "subtract"){
+  x <- df[[column_1]]  # extract the vector
+  y <- df[[column_2]]  # extract the vector
+  df <- df %>%
+    mutate(!!new_column := x-y)
+  return(df)
+}
+
+#calculates the average of several rows
+ave_rows <- function(df, cols, min_count = 9, new_col = "tot_chg") {
+  df <- df %>%
+    mutate(
+      !!new_col := ifelse(
+        rowSums(!is.na(select(., all_of(cols)))) >= min_count,
+        rowMeans(select(., all_of(cols)), na.rm = TRUE),
+        NA_real_
+      )
+    )
+  return(df)
+}
+
+calc_custom_index <- function(df, change_col, index_col, start_row = 1, start_value = 100) {
+  df[[index_col]] <- NA_real_  # Create an empty index column with NA
+  df[[index_col]][start_row] <- start_value  # Set starting value at start_row
+  for (i in (start_row + 1):nrow(df)) {
+    df[[index_col]][i] <- df[[index_col]][i - 1] * 
+      ((200 + df[[change_col]][i]) / (200 - df[[change_col]][i]))
+  }
+  return(df)
+}
+
+#create a function that calculates sym_pct_chg, abs_sym_pct_chg, standard change, and smoothed growth rate. 
+#includes a variable to specify if its quarterly or monthly, specifications for different index ranges, 
+#and variables to calculate subtracted vs symetric percent change, average or divided smgr, include absolute value or inverted values, 
+#show chg as percentage, and calculate averages using ave_dev instead of mean
+
+chg <- function(df, column, 
+                index_range = 0:nrow(df),     # rows used for finding average, default is entire range
+                ave_abs_chg_index_range = index_range,  # rows used for finding average absolute change, default is index range
+                q = FALSE,                    # FALSE: data is monthly and multiplier is 12,      TRUE: data is quarterly and multiplier is 4 
+                subtract = FALSE,             # FALSE: symmetric % change,                        TRUE: simple difference
+                smgr_ave = FALSE,             # FALSE: use smgr_div() to calculate smgr,          TRUE: use smgr_ave() to calculate smgr
+                smgr = FALSE,                 # FALSE: don't include smoothed growth rate,        TRUE: include smoothed growth rate
+                inv = FALSE,                  # FALSE: don't include inverted std change column,  TRUE: include inverted std change column
+                abs = FALSE,                  # FALSE: don't include abs change columns,          TRUE: include abs change column
+                pct = FALSE,                  # FALSE: don't scale change,                        TRUE: scale change as a pct
+                ave_dev = TRUE) {             # FALSE: use mean(|chg|)                            TRUE: use custom ave_dev() on chg 
+                                              # all booleans are false other than ave_dev because of what is most common to avoid extra code when calling
+                                              # ave_dev is flipped because that is most common in practice
+  
+  # Create chg column 
+  #if subtract = FALSE, use sympctchg from previous value, if TRUE, use subtraction from previous value
+  if (!subtract) {
+    df <- dplyr::mutate(df, chg = symmetric_pct_change(dplyr::lag(.data[[column]]), .data[[column]]))
+  } else {
+    df <- dplyr::mutate(df, chg = .data[[column]] - dplyr::lag(.data[[column]]))
+  }
+  
+  df$abs_chg <- base::abs(df$chg) # create a column with absolute change
+  if (pct) df$chg <- df$chg * 0.01  # optional percent scaling for chg column
+  
+  # Create ranges used to find averages  
+  n <- nrow(df) #saves number of rows into variable n
+  idx1 <- index_range[index_range >= 1 & index_range <= n]
+  idx2 <- ave_abs_chg_index_range[ave_abs_chg_index_range >= 1 & ave_abs_chg_index_range <= n]
+  
+  # Calculate Averages
+  # find averages based on two formula and range options
+  # If ave_dev=TRUE, call  ave_dev() on chg[idx1]; else use mean(|chg|) over idx2.
+  if (isTRUE(ave_dev)) {
+    ave_abs_chg <- get("ave_dev", mode = "function")(df$chg[idx1])
+  } else {
+    ave_abs_chg <- mean(df$abs_chg[idx2], na.rm = TRUE)
+  }
+  
+  # Calculate standard change
+  df$st_chg <- df$chg / ave_abs_chg
+  
+  # Calculate smoothed growth rate (optional)
+  if (isTRUE(smgr)) {
+    #use either smgr_ave() or smgr_div() to calculate smgr
+    if (!isTRUE(smgr_ave)) {
+      df <- smgr_div(df, column)
+    } else {
+      df <- smgr_ave(df, column)
+    }
+  }
+  
+  # include inverted standard change (optional)
+  if (isTRUE(inv)) df$inv <- ifelse(!is.na(df$st_chg), -df$st_chg, NA_real_)
+  
+  # remove absolute change (optional)
+  if (!isTRUE(abs)) df$abs_chg <- NULL
+  
+  df
+}
+
+#pads fred data with a csv from MariaDB
+pad_fred <- function(crb, crb_csv, value_name = "value") {
+  padded <- crb %>%
+    full_join(crb_csv %>% select(date, fallback = all_of(value_name)), by = "date") %>%
+    arrange(date) %>%
+    mutate(
+      !!value_name := coalesce(.data[[value_name]], fallback)
+    ) %>%
+    select(-fallback)
+  
+  return(padded)
+}
