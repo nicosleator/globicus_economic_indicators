@@ -38,15 +38,7 @@ ICSA <- ICSA %>% #averages out weekly data into monthly, becomes the same as exc
 
 
 ACDGNO <- pad_fred(read_fred_from_maria(series_id = "ACDGNO"), dbReadTable(con, "MNOCG")) %>% rename(ACDGNO = value)#reads the data from fred and csv and pads it
-write_csv(ACDGNO %>% filter(date >= "1959-01-01"),
-  "ACDGNO_260208.csv"
-)
-
 ANDENO <- pad_fred(read_fred_from_maria(series_id = "ANDENO"), dbReadTable(con, "NOCG")) %>% rename(ANDENO = value)#reads the data from fred and csv and pads it
-write_csv(ANDENO %>% filter(date >= "1959-01-01"),
-          "ANDENO_260208.csv"
-)
-
 napm_no <- dbReadTable(con, "NAPMNO") %>% rename(napm_no = value) #get from ISM and change name
 napm_inven <- dbReadTable(con, "NAPMINVEN") %>% rename(napm_inven = value) #get from ISM and change name
 napm_vp <- dbReadTable(con, "NAPMVP") %>% rename(napm_vp = value) #get from ISM and change name
@@ -60,8 +52,6 @@ sp500 <- sp500 %>% #averages out weekly data into monthly, becomes the same as e
   rename(date = month)
 
 PINDUINDEXM <- pad_fred(read_fred_from_maria(series_id = "PINDUINDEXM"), dbReadTable(con, "CRB")) %>% rename(PINDUINDEXM = value)#reads the data from fred and csv and pads it
-write_csv(PINDUINDEXM,"PINDUINDEXM_260208.csv")
-
 AAA <- read_fred_from_maria(series_id = "AAA", value_name = "AAA") #same as excel
 BAA <- read_fred_from_maria(series_id = "BAA", value_name = "BAA") #same as excel
 RSPRD <- data.frame(date = monthly_dates) %>% # this should be a data frame with a 'date' column
