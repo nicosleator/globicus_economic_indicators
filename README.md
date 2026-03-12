@@ -28,7 +28,7 @@ con <- dbConnect(MariaDB(),
                  host = '127.0.0.1')
 ```
 
-
+Some FRED series have gaps in their historical data, which are filled using the CSVs included in the repository.
 
 ## Project Structure
 
